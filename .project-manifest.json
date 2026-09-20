@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "name": "solo-0009-archive-weave",
+  "project_shape": "backend",
+  "modules": [
+    {
+      "id": "entry",
+      "path": "cmd",
+      "responsibility": "HTTP 服务入口与本地工作流检查入口"
+    },
+    {
+      "id": "httpapi",
+      "path": "internal/httpapi",
+      "responsibility": "请求解析、只读边界、错误映射和 HTTP 路由"
+    },
+    {
+      "id": "catalog",
+      "path": "internal/catalog",
+      "responsibility": "档案受理、状态编排、审核、检索、导出和摘要"
+    },
+    {
+      "id": "domain",
+      "path": "internal/domain",
+      "responsibility": "档案实体、生命周期、审计事件和字段规则"
+    },
+    {
+      "id": "storage",
+      "path": "internal/storage",
+      "responsibility": "内存与 JSON 存储、原子写入、审计保存和并发保护"
+    },
+    {
+      "id": "observability",
+      "path": "internal/observability",
+      "responsibility": "结构化请求日志和运行计数"
+    },
+    {
+      "id": "workflowcheck",
+      "path": "internal/workflowcheck",
+      "responsibility": "通过真实 HTTP 路径执行本地验收场景"
+    }
+  ],
+  "complexity": {
+    "mechanisms": [
+      "state_transition",
+      "error_propagation",
+      "resource_lifecycle",
+      "concurrency",
+      "deterministic_export"
+    ]
+  },
+  "workflows": [
+    {
+      "id": "intake-artifact",
+      "name": "受理档案",
+      "entry": "POST /artifacts",
+      "steps": [
+        "解析并校验标题、摘要、来源、年代和标签",
+        "创建版本为 1 的草稿档案",
+        "原子持久化档案并追加创建事件"
+      ],
+      "success": "返回草稿档案及其版本号和创建时间",
+      "failure": "字段不合法时返回稳定的字段错误，审计写入失败时回滚档案",
+      "verification": "通过 HTTP 创建并读取档案，再核对创建轨迹",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "update-metadata",
+      "name": "修订草稿元数据",
+      "entry": "PUT /artifacts/{id}/metadata",
+      "steps": [
+        "读取当前档案并确认仍为草稿",
+        "校验并标准化新的元数据",
+        "递增版本、保存档案并追加修订事件"
+      ],
+      "success": "返回版本递增后的草稿档案",
+      "failure": "非草稿或字段错误时拒绝修改且保留原值",
+      "verification": "修改后重新读取档案并核对版本与历史事件顺序",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "submit-review",
+      "name": "提交审核",
+      "entry": "POST /artifacts/{id}/submit",
+      "steps": [
+        "读取草稿并复核必填元数据",
+        "执行 draft 到 pending_review 的状态迁移",
+        "保存新版本并追加提交事件"
+      ],
+      "success": "返回待审核档案和提交时间",
+      "failure": "非草稿或必填信息不足时返回状态错误",
+      "verification": "提交后读取档案状态并核对事件轨迹",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "decide-review",
+      "name": "审核决定",
+      "entry": "POST /artifacts/{id}/review",
+      "steps": [
+        "校验审核决定、审核人和退回说明",
+        "批准进入 approved 或退回 draft",
+        "保存审核记录、版本和事件轨迹"
+      ],
+      "success": "批准后可通过公开导出路径读取档案",
+      "failure": "待审核状态不匹配或退回缺少说明时返回错误",
+      "verification": "完成批准并读取单条公开导出结果",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "search-export",
+      "name": "筛选与集合导出",
+      "entry": "GET /collections/export",
+      "steps": [
+        "解析公开视图、关键词、标签、年份和排序条件",
+        "筛选并稳定排序档案集合",
+        "生成带 SHA-256 校验和的确定性 JSON"
+      ],
+      "success": "返回集合条数、查询描述、档案列表和校验和",
+      "failure": "非法筛选参数返回字段错误",
+      "verification": "只导出已批准档案并重新计算结果校验和",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "import-batch",
+      "name": "批量受理",
+      "entry": "POST /artifacts/batch",
+      "steps": [
+        "先校验整批条目并拒绝任何无效项",
+        "按顺序写入草稿和创建事件",
+        "在写入失败时删除已写入档案及对应事件"
+      ],
+      "success": "返回整批创建结果和数量",
+      "failure": "输入为空、超限或含非法项时整组拒绝",
+      "verification": "批量受理后核对返回数量与目录摘要总数",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "language": "go",
+  "project_shape": "backend",
+  "source_extensions": [
+    ".go"
+  ],
+  "build_command": "go build ./...",
+  "testing": "deferred",
+  "workflow_checks": [
+    {
+      "workflow_id": "intake-artifact",
+      "command": "go run ./cmd/archiveweave-check --workflow intake-artifact"
+    },
+    {
+      "workflow_id": "update-metadata",
+      "command": "go run ./cmd/archiveweave-check --workflow update-metadata"
+    },
+    {
+      "workflow_id": "submit-review",
+      "command": "go run ./cmd/archiveweave-check --workflow submit-review"
+    },
+    {
+      "workflow_id": "decide-review",
+      "command": "go run ./cmd/archiveweave-check --workflow decide-review"
+    },
+    {
+      "workflow_id": "search-export",
+      "command": "go run ./cmd/archiveweave-check --workflow search-export"
+    },
+    {
+      "workflow_id": "import-batch",
+      "command": "go run ./cmd/archiveweave-check --workflow import-batch"
+    }
+  ]
+}
