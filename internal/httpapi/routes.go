@@ -1,6 +1,10 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
+
+	"example.com/solo-0009-archive-weave/internal/domain"
+)
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.health)
@@ -17,6 +21,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /artifacts/{id}/history", s.artifactHistory)
 	s.mux.HandleFunc("GET /artifacts/{id}/export", s.exportArtifact)
 	s.mux.HandleFunc("GET /collections/export", s.exportCollection)
+
+	s.mux.HandleFunc("POST /comparisons", s.writable(s.withComparisons(s.submitComparison)))
+	s.mux.HandleFunc("GET /comparisons", s.withComparisons(s.listComparisons))
+	s.mux.HandleFunc("GET /comparisons/{id}", s.withComparisons(s.getComparison))
+}
+
+// withComparisons 在比较能力未接线时返回稳定错误，避免空指针。
+func (s *Server) withComparisons(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.comparisons == nil {
+			writeError(w, domain.Conflict("comparison service is not configured"))
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

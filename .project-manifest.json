@@ -26,7 +26,12 @@
     {
       "id": "storage",
       "path": "internal/storage",
-      "responsibility": "内存与 JSON 存储、原子写入、审计保存和并发保护"
+      "responsibility": "内存与 JSON 存储、原子写入、审计保存、版本快照和并发保护"
+    },
+    {
+      "id": "comparison",
+      "path": "internal/comparison",
+      "responsibility": "版本比较任务编排、版本固化解析、字段差异、结果复用、有界并发与重启恢复"
     },
     {
       "id": "observability",
@@ -166,6 +171,45 @@
         "httpapi",
         "catalog",
         "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "archive-comparison",
+      "name": "档案版本比较",
+      "entry": "POST /comparisons",
+      "steps": [
+        "校验引用与多个目标并固化各自的具体版本",
+        "按输入指纹复用既有任务，否则创建逐项比较任务",
+        "有界并发解析不可变快照并产出字段级差异，单项失败只标记该项目"
+      ],
+      "success": "逐项返回相等判定、字段差异或稳定失败原因",
+      "failure": "引用不存在或版本非法时整请求 4xx 拒绝；目标问题逐项保留原因",
+      "verification": "提交混合目标核对逐项结果，修订引用后确认结论不变，再以相同输入验证复用",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "comparison",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "comparison-recovery",
+      "name": "比较并发与重启恢复",
+      "entry": "GET /comparisons/{id}",
+      "steps": [
+        "以受限并发执行大批目标并观测同时在途数量",
+        "在任务在途时停止实例并以同一磁盘重新装配服务",
+        "重扫持久化任务，把残留 running 项目退回 pending 后重新执行"
+      ],
+      "success": "重启后未结束项目被恢复并完成，已保存结论仍可查看",
+      "failure": "并发超过上限或恢复后项目缺失、状态不一致",
+      "verification": "核对观测在途数不超过上限，重启后任务最终完成且逐项版本绑定正确",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "comparison",
         "storage"
       ]
     }

@@ -25,6 +25,14 @@ func writeAuditEvents(path string, values []domain.AuditEvent) error {
 	return writeJSONArray(path, values)
 }
 
+func readSnapshots(path string) ([]domain.Artifact, error) {
+	return readJSONArray[domain.Artifact](path)
+}
+
+func writeSnapshots(path string, values []domain.Artifact) error {
+	return writeJSONArray(path, values)
+}
+
 func readJSONArray[T any](path string) ([]T, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

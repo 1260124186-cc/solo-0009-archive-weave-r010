@@ -5,24 +5,28 @@ import (
 	"time"
 
 	"example.com/solo-0009-archive-weave/internal/catalog"
+	"example.com/solo-0009-archive-weave/internal/comparison"
 	"example.com/solo-0009-archive-weave/internal/observability"
 )
 
 type Server struct {
-	service  *catalog.Service
-	logger   *observability.Logger
-	metrics  *observability.Metrics
-	mux      *http.ServeMux
-	readOnly bool
+	service     *catalog.Service
+	comparisons *comparison.Manager
+	logger      *observability.Logger
+	metrics     *observability.Metrics
+	mux         *http.ServeMux
+	readOnly    bool
 }
 
-func NewServer(service *catalog.Service, logger *observability.Logger, metrics *observability.Metrics, readOnly bool) *Server {
+func NewServer(service *catalog.Service, comparisons *comparison.Manager,
+	logger *observability.Logger, metrics *observability.Metrics, readOnly bool) *Server {
 	server := &Server{
-		service:  service,
-		logger:   logger,
-		metrics:  metrics,
-		mux:      http.NewServeMux(),
-		readOnly: readOnly,
+		service:     service,
+		comparisons: comparisons,
+		logger:      logger,
+		metrics:     metrics,
+		mux:         http.NewServeMux(),
+		readOnly:    readOnly,
 	}
 	server.routes()
 	return server

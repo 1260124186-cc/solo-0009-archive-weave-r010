@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"example.com/solo-0009-archive-weave/internal/catalog"
+	"example.com/solo-0009-archive-weave/internal/comparison"
 	"example.com/solo-0009-archive-weave/internal/domain"
 	"example.com/solo-0009-archive-weave/internal/httpapi"
 	"example.com/solo-0009-archive-weave/internal/observability"
@@ -21,9 +22,10 @@ import (
 )
 
 type harness struct {
-	client *http.Client
-	base   string
-	dir    string
+	client  *http.Client
+	base    string
+	dir     string
+	catalog *catalog.Service
 }
 
 func Run(ctx context.Context, workflow string) error {
@@ -41,6 +43,10 @@ func Run(ctx context.Context, workflow string) error {
 		return runWithHarness(ctx, checkSearchExport)
 	case "import-batch":
 		return runWithHarness(ctx, checkImportBatch)
+	case "archive-comparison":
+		return runWithHarness(ctx, checkArchiveComparison)
+	case "comparison-recovery":
+		return runWithHarness(ctx, checkComparisonRecovery)
 	case "all":
 		for _, name := range []string{
 			"intake-artifact",
@@ -49,6 +55,8 @@ func Run(ctx context.Context, workflow string) error {
 			"decide-review",
 			"search-export",
 			"import-batch",
+			"archive-comparison",
+			"comparison-recovery",
 		} {
 			if err := Run(ctx, name); err != nil {
 				return err
@@ -67,18 +75,34 @@ func runWithHarness(ctx context.Context, check func(context.Context, *harness) e
 	}
 	defer os.RemoveAll(directory)
 
-	repository := storage.NewJSONStore(filepath.Join(directory, "artifacts.json"))
+	h, server, err := newHarness(directory)
+	if err != nil {
+		return err
+	}
+	defer server.Close()
+	return check(ctx, h)
+}
+
+func newHarness(directory string) (*harness, *httptest.Server, error) {
+	snapshots := storage.NewJSONSnapshotStore(filepath.Join(directory, "snapshots.json"))
+	repository := storage.NewSnapshottingRepository(
+		storage.NewJSONStore(filepath.Join(directory, "artifacts.json")), snapshots)
 	auditRepository := storage.NewJSONAuditStore(filepath.Join(directory, "history.json"))
 	service := catalog.NewService(repository, auditRepository)
-	server := httptest.NewServer(httpapi.NewServer(service, observability.NewLogger(), &observability.Metrics{}, false).Handler())
-	defer server.Close()
-
+	jobStore := comparison.NewJSONJobStore(filepath.Join(directory, "comparisons.json"))
+	manager := comparison.NewManager(jobStore, snapshots, comparison.Options{
+		Concurrency: 2,
+	}, observability.NewLogger(), &observability.Metrics{})
+	manager.Start(context.Background())
+	server := httptest.NewServer(httpapi.NewServer(service, manager,
+		observability.NewLogger(), &observability.Metrics{}, false).Handler())
 	h := &harness{
-		client: &http.Client{Timeout: 10 * time.Second},
-		base:   server.URL,
-		dir:    directory,
+		client:  &http.Client{Timeout: 10 * time.Second},
+		base:    server.URL,
+		dir:     directory,
+		catalog: service,
 	}
-	return check(ctx, h)
+	return h, server, nil
 }
 
 func verifyIntake(ctx context.Context, h *harness) error {
