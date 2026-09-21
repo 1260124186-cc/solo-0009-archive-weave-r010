@@ -17,6 +17,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /artifacts/{id}/history", s.artifactHistory)
 	s.mux.HandleFunc("GET /artifacts/{id}/export", s.exportArtifact)
 	s.mux.HandleFunc("GET /collections/export", s.exportCollection)
+
+	s.mux.HandleFunc("POST /comparisons", s.writable(s.createComparison))
+	s.mux.HandleFunc("GET /comparisons", s.listComparisons)
+	s.mux.HandleFunc("GET /comparisons/{id}", s.getComparison)
+	s.mux.HandleFunc("POST /comparisons/{id}/resume", s.writable(s.resumeComparison))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

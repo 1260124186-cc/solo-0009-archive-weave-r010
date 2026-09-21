@@ -21,9 +21,14 @@ import (
 )
 
 type harness struct {
-	client *http.Client
-	base   string
-	dir    string
+	client     *http.Client
+	base       string
+	dir        string
+	comparison *catalog.ComparisonService
+	repo       *storage.JSONStore
+	snapshots  *storage.JSONSnapshotStore
+	jobs       *storage.JSONComparisonStore
+	cancel     context.CancelFunc
 }
 
 func Run(ctx context.Context, workflow string) error {
@@ -41,6 +46,8 @@ func Run(ctx context.Context, workflow string) error {
 		return runWithHarness(ctx, checkSearchExport)
 	case "import-batch":
 		return runWithHarness(ctx, checkImportBatch)
+	case "compare-versions":
+		return runWithHarness(ctx, checkCompareVersions)
 	case "all":
 		for _, name := range []string{
 			"intake-artifact",
@@ -49,6 +56,7 @@ func Run(ctx context.Context, workflow string) error {
 			"decide-review",
 			"search-export",
 			"import-batch",
+			"compare-versions",
 		} {
 			if err := Run(ctx, name); err != nil {
 				return err
@@ -69,14 +77,26 @@ func runWithHarness(ctx context.Context, check func(context.Context, *harness) e
 
 	repository := storage.NewJSONStore(filepath.Join(directory, "artifacts.json"))
 	auditRepository := storage.NewJSONAuditStore(filepath.Join(directory, "history.json"))
-	service := catalog.NewService(repository, auditRepository)
-	server := httptest.NewServer(httpapi.NewServer(service, observability.NewLogger(), &observability.Metrics{}, false).Handler())
+	snapshotRepository := storage.NewJSONSnapshotStore(filepath.Join(directory, "snapshots.json"))
+	comparisonRepository := storage.NewJSONComparisonStore(filepath.Join(directory, "comparisons.json"))
+	service := catalog.NewService(repository, auditRepository).WithVersionSnapshots(snapshotRepository)
+	comparisonService := catalog.NewComparisonService(comparisonRepository, repository, snapshotRepository, 2)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	comparisonService.Start(runCtx)
+	defer comparisonService.Stop()
+	server := httptest.NewServer(httpapi.NewServer(service, comparisonService, observability.NewLogger(), &observability.Metrics{}, false).Handler())
 	defer server.Close()
 
 	h := &harness{
-		client: &http.Client{Timeout: 10 * time.Second},
-		base:   server.URL,
-		dir:    directory,
+		client:     &http.Client{Timeout: 10 * time.Second},
+		base:       server.URL,
+		dir:        directory,
+		comparison: comparisonService,
+		repo:       repository,
+		snapshots:  snapshotRepository,
+		jobs:       comparisonRepository,
+		cancel:     cancel,
 	}
 	return check(ctx, h)
 }
@@ -379,4 +399,12 @@ func (h *harness) request(ctx context.Context, method, path string, body any, ta
 		return fmt.Errorf("decode %s %s: %w", method, path, err)
 	}
 	return nil
+}
+
+func readLimited(response *http.Response) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	return data, nil
 }

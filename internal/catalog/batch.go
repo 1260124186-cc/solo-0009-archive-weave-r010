@@ -77,6 +77,17 @@ func (s *Service) ImportBatch(ctx context.Context, inputs []domain.CreateArtifac
 		}
 		appended = append(appended, event)
 	}
+	for _, artifact := range saved {
+		if err := s.recordSnapshot(ctx, artifact); err != nil {
+			rollbackErr := s.rollbackArtifacts(ctx, saved)
+			for _, existing := range appended {
+				if deleteErr := s.audit.DeleteByArtifact(ctx, existing.ArtifactID); deleteErr != nil {
+					rollbackErr = errors.Join(rollbackErr, deleteErr)
+				}
+			}
+			return BatchResult{}, errors.Join(err, rollbackErr)
+		}
+	}
 	return BatchResult{Count: len(saved), Artifacts: saved}, nil
 }
 

@@ -16,3 +16,9 @@ func lockedWrite[T any](g *gate, fn func() T) T {
 	g.write(func() { result = fn() })
 	return result
 }
+func lockedWrite2[T any](g *gate, fn func() (T, error)) (T, error) {
+	var result T
+	var err error
+	g.write(func() { result, err = fn() })
+	return result, err
+}

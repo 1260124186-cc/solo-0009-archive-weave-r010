@@ -34,6 +34,8 @@ func writeError(w http.ResponseWriter, err error) {
 			status = http.StatusNotFound
 		case domain.ErrConflict, domain.ErrState:
 			status = http.StatusConflict
+		case domain.ErrUnavailable:
+			status = http.StatusServiceUnavailable
 		}
 	}
 	writeJSON(w, status, map[string]any{

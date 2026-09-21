@@ -9,6 +9,7 @@ const (
 	ErrNotFound     ErrorCode = "not_found"
 	ErrConflict     ErrorCode = "conflict"
 	ErrState        ErrorCode = "invalid_state"
+	ErrUnavailable  ErrorCode = "unavailable"
 )
 
 type AppError struct {
@@ -29,3 +30,6 @@ func Invalid(field, message string) error {
 func NotFound(message string) error { return AppError{Code: ErrNotFound, Message: message} }
 func Conflict(message string) error { return AppError{Code: ErrConflict, Message: message} }
 func State(message string) error    { return AppError{Code: ErrState, Message: message} }
+func Unavailable(message string) error {
+	return AppError{Code: ErrUnavailable, Message: message}
+}

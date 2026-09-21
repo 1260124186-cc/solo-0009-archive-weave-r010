@@ -45,6 +45,9 @@ func (s *Service) CreateAs(ctx context.Context, input domain.CreateArtifact, act
 	if err == nil {
 		err = s.audit.Append(ctx, event)
 	}
+	if err == nil {
+		err = s.recordSnapshot(ctx, artifact)
+	}
 	if err != nil {
 		rollbackErr := s.repo.Delete(ctx, artifact.ID)
 		if rollbackErr != nil {

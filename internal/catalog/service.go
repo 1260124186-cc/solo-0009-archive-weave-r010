@@ -16,11 +16,12 @@ import (
 const DefaultActor = "archive-service"
 
 type Service struct {
-	repo   storage.Repository
-	audit  storage.AuditRepository
-	policy Policy
-	clock  func() time.Time
-	nextID func() string
+	repo      storage.Repository
+	audit     storage.AuditRepository
+	snapshots storage.VersionSnapshotRepository
+	policy    Policy
+	clock     func() time.Time
+	nextID    func() string
 }
 
 func NewService(repo storage.Repository, audit storage.AuditRepository) *Service {
@@ -34,6 +35,30 @@ func NewService(repo storage.Repository, audit storage.AuditRepository) *Service
 		clock:  time.Now,
 		nextID: uuid.NewString,
 	}
+}
+
+// WithVersionSnapshots enables immutable (artifact id, version) snapshots on
+// every successful write. Comparations resolve historical versions from this
+// store, which keeps them bound to the version seen at submission time.
+func (s *Service) WithVersionSnapshots(repository storage.VersionSnapshotRepository) *Service {
+	s.snapshots = repository
+	return s
+}
+
+// recordSnapshot persists the artifact version. A write failure forces the
+// caller's existing artifact/audit rollback so the durable state never loses a
+// version that a later comparison could try to resolve.
+func (s *Service) recordSnapshot(ctx context.Context, artifact domain.Artifact) error {
+	if s.snapshots == nil {
+		return nil
+	}
+	snapshot := domain.VersionSnapshot{
+		ArtifactID: artifact.ID,
+		Version:    artifact.Version,
+		Artifact:   artifact.Clone(),
+		CapturedAt: s.clock().UTC(),
+	}
+	return s.snapshots.SaveVersion(ctx, snapshot)
 }
 
 func (s *Service) actor(value string) string {
@@ -72,6 +97,9 @@ func (s *Service) applyMutation(
 	event, err := domain.NewAuditEvent(s.nextID(), before, after, action, s.actor(actor), note, after.UpdatedAt)
 	if err == nil {
 		err = s.audit.Append(ctx, event)
+	}
+	if err == nil {
+		err = s.recordSnapshot(ctx, after)
 	}
 	if err != nil {
 		rollbackErr := s.repo.Save(ctx, before)

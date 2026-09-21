@@ -16,17 +16,17 @@
     {
       "id": "catalog",
       "path": "internal/catalog",
-      "responsibility": "档案受理、状态编排、审核、检索、导出和摘要"
+      "responsibility": "档案受理、状态编排、审核、检索、导出、摘要和版本比较调度"
     },
     {
       "id": "domain",
       "path": "internal/domain",
-      "responsibility": "档案实体、生命周期、审计事件和字段规则"
+      "responsibility": "档案实体、生命周期、审计事件、版本快照、比较实体与字段规则"
     },
     {
       "id": "storage",
       "path": "internal/storage",
-      "responsibility": "内存与 JSON 存储、原子写入、审计保存和并发保护"
+      "responsibility": "内存与 JSON 存储、原子写入、版本快照、比较作业、审计保存和并发保护"
     },
     {
       "id": "observability",
@@ -45,7 +45,11 @@
       "error_propagation",
       "resource_lifecycle",
       "concurrency",
-      "deterministic_export"
+      "deterministic_export",
+      "immutable_version_snapshot",
+      "content_fingerprint_reuse",
+      "bounded_worker_pool",
+      "crash_recovery_lease"
     ]
   },
   "workflows": [
@@ -167,6 +171,29 @@
         "catalog",
         "domain",
         "storage"
+      ]
+    },
+    {
+      "id": "compare-versions",
+      "name": "档案版本比较",
+      "entry": "POST /comparisons",
+      "steps": [
+        "解析参考与各目标的具体版本并固化历史快照",
+        "按解析版本集合计算指纹并复用已有作业",
+        "在有界 worker 池中逐项完成字段级比较或记录失败原因",
+        "服务重启或手动 resume 时恢复未结束条目"
+      ],
+      "success": "返回逐项状态、失败原因和绑定历史版本的不可变比较结果",
+      "failure": "目标不存在或版本非法只标记该项失败，参考不合法时整单拒绝",
+      "verification": "通过 HTTP 验证逐项隔离、指纹复用、修订不改写结论以及模拟崩溃后的新进程恢复",
+      "module_ids": [
+        "entry",
+        "httpapi",
+        "catalog",
+        "domain",
+        "storage",
+        "observability",
+        "workflowcheck"
       ]
     }
   ]

@@ -41,6 +41,22 @@ ArchiveWeave 是一个单机运行的档案元数据服务。它把文字描述�
 - `count`、`artifacts`：结果数量和档案列表。
 - `checksum`：对不含校验和字段的 JSON 内容计算 SHA-256。
 
+### VersionSnapshot
+
+- `artifact_id`、`version`：被固化的档案版本坐标。
+- `artifact`：该版本完整档案内容。
+- `captured_at`：固化时间（UTC）。
+- 快照只追加不覆盖，作为比较绑定的历史版本来源。
+
+### ComparisonJob / ComparisonItem
+
+- `reference`：一条 `(artifact_id, version)` 引用；省略版本表示提交时最新版本，提交时解析为具体版本并嵌入参考快照。
+- `items`：多条目标引用，每项独立状态 `pending`、`running`、`succeeded`、`failed`。
+- 失败条目保存 `failure_code`（`artifact_not_found`、`invalid_version` 等）和 `failure_reason`，不影响其他条目。
+- 成功条目的 `result` 嵌入参考与目标快照、`identical`、`changed_fields`、逐字段 `before/after` 和两侧校验和；一旦写入不再改写。
+- `fingerprint`：对解析后的参考版本和目标版本集合计算 SHA-256，用于相同输入结果复用。
+- 作业在全部条目终态时整体为 `succeeded`；条目持有 `lease_owner`、`leased_until` 和 `attempts` 支持崩溃恢复。
+
 ## 状态规则
 
 - 新档案从 `draft` 开始，版本为 1。
@@ -59,6 +75,8 @@ ArchiveWeave 是一个单机运行的档案元数据服务。它把文字描述�
 4. **审核决定**：`POST /artifacts/{id}/review` 校验决定和退回说明，记录审核记录、状态和版本。
 5. **筛选导出**：`GET /collections/export` 在公开视图内筛选、排序并生成带校验和的集合。
 6. **批量受理**：`POST /artifacts/batch` 先校验整批输入，再顺序持久化；失败时回滚已写入档案和事件。
+7. **版本比较**：`POST /comparisons` 解析参考与目标版本并固化快照，相同指纹复用既有作业；条目由有界 worker 池处理，失败项保留原因，成功项绑定历史版本快照。
+8. **比较恢复**：服务启动或 `POST /comparisons/{id}/resume` 时把未结束条目重新排队；租约过期的卡死条目由后台 reaper 回收，终态结果不重算。
 
 ## 模块与依赖方向
 
@@ -77,12 +95,16 @@ ArchiveWeave 是一个单机运行的档案元数据服务。它把文字描述�
 - 服务收到退出信号后使用配置的时限执行 HTTP 优雅停机。
 - 工作流检查为每次运行创建独立临时目录，结束或失败时删除。
 - 单条变更在审计追加失败时恢复旧档案；批量受理在失败时反向回滚已保存档案与事件。
+- 每次成功写入档案同时追加不可变版本快照；快照写入失败按既有回滚链处理。
+- 比较 worker 数量固定且可配置，条目通过存储层原子条件更新领取租约，队列满时由定时扫描兜底，避免无限 goroutine。
+- 比较结果先持久化再对外可见；进程崩溃只丢失租约，不丢失已保存结论，重启后继续未完成条目。
 
 ## 验证计划
 
 - `go build ./...` 验证全部包可编译。
-- `go run ./cmd/archiveweave-check --workflow <name>` 逐一验证六条工作流。
+- `go run ./cmd/archiveweave-check --workflow <name>` 逐一验证七条工作流。
 - 检查内容覆盖合法输入、版本递增、状态迁移、审核限制、公开筛选、导出校验和、批量写入与摘要总量。
+- 比较检查覆盖逐项失败隔离、指纹复用、历史版本绑定不被后续修订改写、有界批处理排空以及模拟崩溃后新进程恢复未结束条目。
 - 所有检查使用临时文件，不访问网络服务，不修改仓库内数据。
 
 ## 延后测试边界

@@ -26,8 +26,15 @@ func main() {
 	metrics := &observability.Metrics{}
 	repository := storage.NewJSONStore(cfg.DataPath)
 	auditRepository := storage.NewJSONAuditStore(cfg.AuditPath)
-	service := catalog.NewService(repository, auditRepository)
-	handler := httpapi.NewServer(service, logger, metrics, cfg.ReadOnly).Handler()
+	snapshotRepository := storage.NewJSONSnapshotStore(cfg.SnapshotPath)
+	comparisonRepository := storage.NewJSONComparisonStore(cfg.ComparisonPath)
+	service := catalog.NewService(repository, auditRepository).WithVersionSnapshots(snapshotRepository)
+	comparisonService := catalog.NewComparisonService(
+		comparisonRepository, repository, snapshotRepository, cfg.ComparisonWorkers,
+	).WithHooks(metrics.Write, func(succeeded bool) {
+		metrics.ComparisonItem(succeeded)
+	})
+	handler := httpapi.NewServer(service, comparisonService, logger, metrics, cfg.ReadOnly).Handler()
 	server := &http.Server{
 		Addr:              cfg.Address,
 		Handler:           handler,
@@ -38,12 +45,22 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Read-only mode must not recover or advance jobs; stored results remain
+	// readable through the GET routes.
+	if !cfg.ReadOnly {
+		comparisonService.Start(ctx)
+		defer comparisonService.Stop()
+	}
 	go func() {
 		logger.Event("server_started", map[string]any{
-			"address":    cfg.Address,
-			"data_path":  cfg.DataPath,
-			"audit_path": cfg.AuditPath,
-			"read_only":  cfg.ReadOnly,
+			"address":            cfg.Address,
+			"data_path":          cfg.DataPath,
+			"audit_path":         cfg.AuditPath,
+			"snapshot_path":      cfg.SnapshotPath,
+			"comparison_path":    cfg.ComparisonPath,
+			"comparison_workers": cfg.ComparisonWorkers,
+			"read_only":          cfg.ReadOnly,
 		})
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)

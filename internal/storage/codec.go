@@ -25,6 +25,22 @@ func writeAuditEvents(path string, values []domain.AuditEvent) error {
 	return writeJSONArray(path, values)
 }
 
+func readSnapshots(path string) ([]domain.VersionSnapshot, error) {
+	return readJSONArray[domain.VersionSnapshot](path)
+}
+
+func writeSnapshots(path string, values []domain.VersionSnapshot) error {
+	return writeJSONArray(path, values)
+}
+
+func readComparisonJobs(path string) ([]domain.ComparisonJob, error) {
+	return readJSONArray[domain.ComparisonJob](path)
+}
+
+func writeComparisonJobs(path string, values []domain.ComparisonJob) error {
+	return writeJSONArray(path, values)
+}
+
 func readJSONArray[T any](path string) ([]T, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
